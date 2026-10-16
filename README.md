@@ -1,36 +1,84 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Takedown Ledger
 
-## Getting Started
+**A public record of content takedown demands that no operator can quietly erase.** Built on
+[Arkiv](https://arkiv.network), the Web3 database, for the Arkiv Global Tour Stop (pre-Devcon 8).
+Track: **Censorship Resistance**.
 
-First, run the development server:
+**Live app:** https://takedown-ledger.vercel.app
+
+> All notices in the demo are **synthetic**. No real people, no real notices.
+
+## The problem
+
+Governments, courts and companies send huge numbers of demands to remove content. The public record of
+those demands is thin and fragile: transparency reports are published at platforms' discretion, and the
+largest public archive of takedown notices is run by a single organisation that has had to restrict
+public access under pressure. When the record of censorship can itself be removed, censorship becomes
+invisible.
+
+## What it does
+
+- **File a notice:** jurisdiction, who asked, the legal basis cited, what was targeted.
+- **Readonly + sealed:** each notice is a `readonly` Arkiv entity whose ownership moves to `0x…dEaD` in the
+  same atomic batch. Nobody can edit it, and nobody, including a filer under pressure, can delete it.
+- **Preserve:** notices live 90 days. Anyone can extend one (`permissionlessExtension`), so the public
+  decides what stays on the record. An "expiring soon" panel queries `$expiresAt`.
+- **Outcomes:** record what happened (complied, refused, challenged, reinstated). An atomic batch keeps the
+  notice alive at least as long as its outcome.
+- **Attributed:** `$creator` shows who filed every notice and outcome, and powers the filer page.
+- **Live:** WebSocket entity events push new notices and extensions into the UI with no refresh.
+
+See [`arkiv/schema.md`](arkiv/schema.md) for entity types, attributes, lifetimes and queries, and
+[`arkiv/friction.md`](arkiv/friction.md) for the friction report.
+
+## Why Arkiv
+
+| Alternative | What breaks |
+|---|---|
+| Postgres / own API | An operator can be compelled to delete rows or restrict access. That's the exact failure we're fixing. |
+| IPFS | Content vanishes when unpinned, there are no queries, and no lifetime the public can extend. |
+| Subgraph | Only indexes data that must live somewhere else first. |
+
+**Kept off Arkiv:** the removed content itself, all personal data, original scanned notices.
+
+## Run it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev            # http://localhost:3000 (reads straight from Tiramisu, no backend)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Reading needs no wallet. To write, use **Connect → In-browser test wallet** (no extension needed) or
+MetaMask, then fund the address at the [Arkiv faucet](https://hub.arkiv.network/faucet).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Reproduce our Arkiv usage (for judges)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run verify         # read-only: runs every query the app uses, prints the results. No key needed.
+```
 
-## Learn More
+Optional, needs a funded **testnet-only** key in `.env.local` as `ARKIV_PRIVATE_KEY=0x…`:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run seed           # files the 10 synthetic notices + 7 outcomes
+npm run seal-check     # files one notice, then proves its own filer can't delete it
+npm run guarantees     # proves readonly is enforced and a stranger wallet can extend
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## On-chain evidence (Tiramisu)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Address | Role |
+|---|---|
+| `0xb8543400C0A46bDce6acC9f776E38Da887973c6F` | Seed filer: created all demo notices and outcomes (`$creator`) |
+| `0x000000000000000000000000000000000000dEaD` | Seal owner of every notice (nobody holds this key) |
+| `0x02bD…Fb94` (throwaway) | Stranger wallet that extended a notice in `scripts/guarantees.ts` |
 
-## Deploy on Vercel
+Explorer: https://tiramisu.explorer.arkiv.network/address/0xb8543400C0A46bDce6acC9f776E38Da887973c6F
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Stack
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Next.js 16 (App Router, client-side reads) · `@arkiv-network/sdk` 0.8.1 · viem · Tailwind CSS.
+
+## License
+
+MIT
