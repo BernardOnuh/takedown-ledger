@@ -24,7 +24,38 @@ export const SEAL_ADDRESS = "0x000000000000000000000000000000000000dEaD" as cons
 export const EXPLORER = "https://tiramisu.explorer.arkiv.network"
 export const FAUCET = "https://hub.arkiv.network/faucet"
 
-export const publicClient = createPublicClient({ chain: tiramisu, transport: http() })
+/** Same-origin relay that adds our API key server-side (src/app/api/rpc/route.ts). */
+const RELAY = "/api/rpc"
+let useRelay = false
+
+/**
+ * Browsers read Arkiv directly on their own anonymous budget. When that is exhausted Arkiv answers 429 with
+ * a Retry-After of ~40 minutes (which viem would silently wait out), so we switch this tab to the relay.
+ * If the relay can't help either, re-label the 429 as 402 (not retried) so the UI can say so.
+ * Scripts running in Node send the key directly instead.
+ */
+const readFetch: typeof fetch = async (input, init) => {
+  const nodeKey = typeof window === "undefined" ? process.env.ARKIV_API_KEY : undefined
+  if (nodeKey) {
+    const headers = new Headers(init?.headers)
+    headers.set("x-api-key", nodeKey)
+    return fetch(input, { ...init, headers })
+  }
+  if (useRelay) return fetch(RELAY, init)
+
+  const res = await fetch(input, init)
+  if (res.status !== 429 || Number(res.headers.get("Retry-After") ?? 0) <= 10) return res
+  if (typeof window !== "undefined") {
+    const relayed = await fetch(RELAY, init).catch(() => null)
+    if (relayed?.ok) {
+      useRelay = true
+      return relayed
+    }
+  }
+  return new Response(await res.text(), { status: 402, statusText: "ANON_COST_LIMITED", headers: { "content-type": "application/json" } })
+}
+
+export const publicClient = createPublicClient({ chain: tiramisu, transport: http(undefined, { fetchFn: readFetch }) })
 
 /** A separate WebSocket client so watchEntityEvents opens a real subscription instead of polling. */
 let ws: ReturnType<typeof makeWs> | undefined
@@ -245,6 +276,22 @@ export function timeLeft(expiresAt: bigint, head: bigint): string {
   if (days >= 1) return `${days}d ${Math.floor((secs % 86400) / 3600)}h`
   const hours = Math.floor(secs / 3600)
   return hours >= 1 ? `${hours}h ${Math.floor((secs % 3600) / 60)}m` : `${Math.ceil(secs / 60)}m`
+}
+
+/** Turns RPC failures into something a reader can act on. Anonymous reads have an hourly budget. */
+export function friendlyError(e: unknown): string {
+  const msg = e instanceof Error ? `${e.message} ${String((e as { details?: unknown }).details ?? "")}` : String(e)
+  if (/ANON_COST_LIMITED|Status: 429|Status: 402/.test(msg))
+    return "Arkiv's free read limit for your network is used up for now. It resets within the hour."
+  if (/User rejected|denied/i.test(msg)) return "Request cancelled in your wallet."
+  if (/insufficient funds/i.test(msg)) return "Not enough test GLM. Top up from the faucet and try again."
+  return msg.split("\n")[0]
+}
+
+/** Seed titles carry a "[SYNTHETIC]" prefix; the UI shows it as a tag instead. */
+export function splitTitle(title: string): { synthetic: boolean; text: string } {
+  const m = /^\s*\[SYNTHETIC\]\s*/i.exec(title)
+  return m ? { synthetic: true, text: title.slice(m[0].length) } : { synthetic: false, text: title }
 }
 
 export const short = (h: string) => `${h.slice(0, 6)}…${h.slice(-4)}`

@@ -30,7 +30,17 @@
   --font-serif: var(--font-serif);
 }
 
+html {
+  color-scheme: light dark;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   background: var(--bg);
   color: var(--ink);
+}
+
+button:not(:disabled),
+summary {
+  cursor: pointer;
 }
