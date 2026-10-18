@@ -1,39 +1,75 @@
 "use client"
 
+import "@rainbow-me/rainbowkit/styles.css"
+import {
+  connectorsForWallets,
+  darkTheme,
+  lightTheme,
+  RainbowKitProvider,
+  useChainModal,
+  useConnectModal,
+} from "@rainbow-me/rainbowkit"
+import {
+  injectedWallet,
+  metaMaskWallet,
+  rabbyWallet,
+  rainbowWallet,
+  walletConnectWallet,
+} from "@rainbow-me/rainbowkit/wallets"
 import { createWalletClient, type WalletArkivClient } from "@arkiv-network/sdk"
 import { tiramisu } from "@arkiv-network/sdk/chains"
-import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
 import { custom, formatEther, http, type Address, type EIP1193Provider, type Hex } from "viem"
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts"
+import { createConfig, useAccount, useDisconnect, WagmiProvider } from "wagmi"
 import { publicClient } from "./arkiv"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Wallet = WalletArkivClient<any, any, any>
-type Mode = "injected" | "burner"
+type Mode = "external" | "burner"
+
+/**
+ * Browser-extension wallets are discovered automatically (EIP-6963). Mobile wallets over WalletConnect need
+ * a free project id from https://cloud.reown.com; without one we only list wallets that don't need it.
+ */
+const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
+const connectors = connectorsForWallets(
+  projectId
+    ? [{ groupName: "Popular", wallets: [metaMaskWallet, rabbyWallet, rainbowWallet, walletConnectWallet] }]
+    : [{ groupName: "Browser wallets", wallets: [injectedWallet, rabbyWallet] }],
+  { appName: "Takedown Ledger", projectId: projectId ?? "" },
+)
+
+const wagmiConfig = createConfig({
+  chains: [tiramisu],
+  connectors,
+  transports: { [tiramisu.id]: http() },
+  ssr: true,
+})
+
+const queryClient = new QueryClient()
+
+const ACCENT = { accentColor: "#b42318", accentColorForeground: "#ffffff", borderRadius: "medium" } as const
+const theme = { lightMode: lightTheme(ACCENT), darkMode: darkTheme({ ...ACCENT, accentColor: "#f97066" }) }
 
 type WalletState = {
   wallet: Wallet | null
   address: Address | null
   mode: Mode | null
   balance: string | null
-  hasInjected: boolean
-  connectInjected: () => Promise<void>
+  /** An external wallet is connected but on another chain; writes are blocked until it switches. */
+  wrongNetwork: boolean
+  openConnect: () => void
+  openSwitchNetwork: () => void
   connectBurner: () => void
   disconnect: () => void
   refreshBalance: () => Promise<void>
 }
 
-const noopSubscribe = () => () => {}
-
 const Ctx = createContext<WalletState | null>(null)
 // A throwaway testnet key kept only in this browser, for judges without a browser wallet.
 const BURNER_KEY = "takedown-ledger:burner"
-
-declare global {
-  interface Window {
-    ethereum?: EIP1193Provider
-  }
-}
 
 const safeStorage = {
   get: (k: string) => {
@@ -51,17 +87,55 @@ const safeStorage = {
 }
 
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const [wallet, setWallet] = useState<Wallet | null>(null)
-  const [mode, setMode] = useState<Mode | null>(null)
+  return (
+    <WagmiProvider config={wagmiConfig}>
+      <QueryClientProvider client={queryClient}>
+        <RainbowKitProvider theme={theme} initialChain={tiramisu} appInfo={{ appName: "Takedown Ledger" }}>
+          <ArkivWallet>{children}</ArkivWallet>
+        </RainbowKitProvider>
+      </QueryClientProvider>
+    </WagmiProvider>
+  )
+}
+
+/** Bridges whichever wallet is active (RainbowKit/wagmi or the burner) into an Arkiv wallet client. */
+function ArkivWallet({ children }: { children: ReactNode }) {
+  const account = useAccount()
+  const { disconnect: wagmiDisconnect } = useDisconnect()
+  const { openConnectModal } = useConnectModal()
+  const { openChainModal } = useChainModal()
+  const [burner, setBurner] = useState<Wallet | null>(null)
+  // Keyed by address so a stale client is ignored after a disconnect or account switch, without an effect reset.
+  const [linked, setLinked] = useState<{ address: Address; wallet: Wallet } | null>(null)
   const [balance, setBalance] = useState<string | null>(null)
 
-  const hasInjected = useSyncExternalStore(
-    noopSubscribe,
-    () => !!window.ethereum,
-    () => false,
-  )
+  const wrongNetwork = !burner && account.isConnected && account.chainId !== tiramisu.id
 
-  const address = (wallet?.account?.address as Address | undefined) ?? null
+  useEffect(() => {
+    const { address, connector, isConnected } = account
+    if (!isConnected || !address || !connector) return
+    let alive = true
+    connector
+      .getProvider()
+      .then((provider) => {
+        if (!alive) return
+        setLinked({
+          address,
+          wallet: createWalletClient({ chain: tiramisu, transport: custom(provider as EIP1193Provider), account: address }) as Wallet,
+        })
+        setBurner(null) // connecting a real wallet replaces the test wallet
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account.address, account.connector, account.isConnected])
+
+  const external = account.isConnected && linked && linked.address === account.address ? linked.wallet : null
+  const active = burner ?? (wrongNetwork ? null : external)
+  const mode: Mode | null = burner ? "burner" : external ? "external" : null
+  const address = (burner?.account?.address ?? (account.isConnected ? account.address : undefined) ?? null) as Address | null
 
   const refreshBalance = useCallback(async () => {
     if (!address) return setBalance(null)
@@ -81,53 +155,35 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [address])
 
-  const connectInjected = useCallback(async () => {
-    const eth = window.ethereum
-    if (!eth) throw new Error("No browser wallet found")
-    const chainId = `0x${tiramisu.id.toString(16)}` as Hex
-    try {
-      await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] })
-    } catch (e) {
-      // 4001 = the user rejected the switch; only offer to add the chain when it's actually missing.
-      if ((e as { code?: number }).code === 4001) throw e
-      await eth.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId,
-            chainName: tiramisu.name,
-            nativeCurrency: tiramisu.nativeCurrency,
-            rpcUrls: [...tiramisu.rpcUrls.default.http],
-            blockExplorerUrls: ["https://tiramisu.explorer.arkiv.network"],
-          },
-        ],
-      })
-    }
-    const [account] = await eth.request({ method: "eth_requestAccounts" })
-    setWallet(createWalletClient({ chain: tiramisu, transport: custom(eth), account }) as Wallet)
-    setMode("injected")
-  }, [])
-
   const connectBurner = useCallback(() => {
+    if (account.isConnected) wagmiDisconnect()
     let pk = safeStorage.get(BURNER_KEY) as Hex | null
     if (!pk) {
       pk = generatePrivateKey()
       safeStorage.set(BURNER_KEY, pk)
     }
-    setWallet(
-      createWalletClient({ chain: tiramisu, transport: http(), account: privateKeyToAccount(pk) }) as Wallet,
-    )
-    setMode("burner")
-  }, [])
+    setBurner(createWalletClient({ chain: tiramisu, transport: http(), account: privateKeyToAccount(pk) }) as Wallet)
+  }, [account.isConnected, wagmiDisconnect])
 
   const disconnect = useCallback(() => {
-    setWallet(null)
-    setMode(null)
-  }, [])
+    setBurner(null)
+    if (account.isConnected) wagmiDisconnect()
+  }, [account.isConnected, wagmiDisconnect])
 
   return (
     <Ctx.Provider
-      value={{ wallet, address, mode, balance, hasInjected, connectInjected, connectBurner, disconnect, refreshBalance }}
+      value={{
+        wallet: active,
+        address,
+        mode,
+        balance,
+        wrongNetwork,
+        openConnect: () => openConnectModal?.(),
+        openSwitchNetwork: () => openChainModal?.(),
+        connectBurner,
+        disconnect,
+        refreshBalance,
+      }}
     >
       {children}
     </Ctx.Provider>

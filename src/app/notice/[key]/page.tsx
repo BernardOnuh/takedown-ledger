@@ -47,7 +47,7 @@ function NoticeView() {
   const { key } = useParams<{ key: Hex }>()
   const filedTx = useSearchParams().get("filed")
   const head = useHead()
-  const { wallet, refreshBalance } = useWallet()
+  const { wallet, wrongNetwork, refreshBalance } = useWallet()
   const [notice, setNotice] = useState<Notice | null | undefined>(undefined)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [outcomes, setOutcomes] = useState<Outcome[]>([])
@@ -84,7 +84,13 @@ function NoticeView() {
 
   const run = async (label: string, fn: () => Promise<{ txHash: string }>, done: string) => {
     if (!wallet) {
-      setMsg({ text: "Connect a wallet first (top right). The in-browser test wallet works.", error: true, source: label })
+      setMsg({
+        text: wrongNetwork
+          ? "Switch your wallet to the Tiramisu network (top right)."
+          : "Connect a wallet first (top right). The in-browser test wallet works.",
+        error: true,
+        source: label,
+      })
       return false
     }
     setBusy(label)

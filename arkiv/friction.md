@@ -3,7 +3,7 @@
 **Environment for every item:** `@arkiv-network/sdk` 0.8.1 · `viem` 2.57.7 · Node 24.2.0 · macOS ·
 Tiramisu testnet (chain `7738577`) · Next.js 16.4.2 · date 16 Oct 2026.
 
-Everything below happened while building this project. Items 1–5 are issues; items 6–10 are paths
+Everything below happened while building this project. Items 1–5 and 11 are issues; items 6–10 are paths
 we tested that worked, documented with the same detail.
 
 ---
@@ -63,6 +63,23 @@ we tested that worked, documented with the same detail.
 - **Workaround:** our own `filed_at` u64 attribute.
 - **Suggested fix:** update AGENTS.md to say "store your own numeric timestamp attribute", or index `$createdAt`.
 
+## 11. An exhausted anonymous query budget makes the app hang for ~40 minutes instead of failing
+
+- **Surface:** Tiramisu RPC rate limiting → viem `http()` transport (used by `createPublicClient`)
+- **Expected:** when the anonymous budget runs out, queries fail fast with an error the app can show.
+- **Actual:** `arkiv_query` returns HTTP 429 with `Retry-After: ~2400` and
+  `{"error":"ANON_COST_LIMITED","message":"unauthenticated query budget exhausted; get an API key at https://hub.arkiv.network …"}`.
+  viem honours `Retry-After`, so every query **silently waits ~40 minutes** before retrying; the UI sits on
+  "loading" with no error. Each query costs ~100 units (`Arkiv-Cost`) against a 10,000 budget, and one
+  listener that looked up every chain-wide entity event burned through it during an afternoon of testing.
+- **Repro:** exhaust the budget (≈100 queries at ~100 units each), then `publicClient.select().where(...).fetch()`.
+- **Workaround:** a custom `fetchFn` that re-labels long-`Retry-After` 429s as a non-retried status, falls
+  back to a server-side relay that adds `x-api-key`, and filters live events by `creationFlags` before any lookup.
+  See `readFetch` in `src/lib/arkiv.ts`.
+- **Suggested fix:** document the anonymous budget and the `x-api-key` / `Authorization: Bearer` header next
+  to `createPublicClient` (we found the header names from the CORS preflight), and give the SDK an
+  `apiKey` option plus a sane default `retryCount`/max delay for 429s.
+
 ---
 
 ## Tested paths that worked
@@ -84,3 +101,5 @@ With `webSocket()` transport and no `fromBlock`, `ExpiryExtended` events arrived
 
 ### 10. Browser CORS and time to first entity
 The Tiramisu RPC returns `access-control-allow-origin: *`, so the whole app runs client-side with no backend. Time to first entity: about 2 hours, mostly spent reading SDK source to learn 0.8 query typing.
+Later we added an optional read relay (`src/app/api/rpc/route.ts`) because of #11; browsers still read
+Arkiv directly first.
