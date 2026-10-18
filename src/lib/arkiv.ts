@@ -174,6 +174,16 @@ export function noticePredicate(f: NoticeFilters = {}): Expression {
   return and(parts)
 }
 
+/** The same filters as noticePredicate, applied client-side to notices that arrive over WebSocket. */
+export function matchesFilters(n: Notice, f: NoticeFilters = {}): boolean {
+  if (f.jurisdiction && n.jurisdiction !== f.jurisdiction) return false
+  if (f.category && n.category !== f.category) return false
+  if (f.requesterType && n.requesterType !== f.requesterType) return false
+  if (f.minUrls && n.urlCount < f.minUrls) return false
+  if (f.sinceDays && n.filedAt < Math.floor(Date.now() / 1000) - f.sinceDays * 86400) return false
+  return true
+}
+
 const MAX_PAGES = 10
 
 /** Walks cursor pages (200 per page) and sorts client-side — the engine has no ORDER BY. */

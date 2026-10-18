@@ -64,7 +64,10 @@ function NoticeView() {
   })
 
   const run = async (label: string, fn: () => Promise<{ txHash: string }>, done: string) => {
-    if (!wallet) return setMsg({ text: "Connect a wallet first (top right).", error: true })
+    if (!wallet) {
+      setMsg({ text: "Connect a wallet first (top right).", error: true })
+      return false
+    }
     setBusy(label)
     setMsg(null)
     try {
@@ -72,8 +75,10 @@ function NoticeView() {
       setMsg({ text: done, tx: txHash })
       await load()
       refreshBalance()
+      return true
     } catch (e) {
       setMsg({ text: (e as Error).message.split("\n")[0], error: true })
+      return false
     } finally {
       setBusy(null)
     }
@@ -145,10 +150,11 @@ function NoticeView() {
 
           <form
             className="mt-4 flex flex-col gap-2 rounded-lg border border-dashed border-[var(--line)] p-3"
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault()
-              run("outcome", () => fileOutcome(wallet!, notice, outcome, note.trim()), "Outcome recorded.")
-              setNote("")
+              // Keep the note on failure so it doesn't have to be retyped.
+              if (await run("outcome", () => fileOutcome(wallet!, notice, outcome, note.trim()), "Outcome recorded."))
+                setNote("")
             }}
           >
             <div className="flex flex-wrap items-end gap-2">

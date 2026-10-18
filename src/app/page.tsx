@@ -8,6 +8,7 @@ import {
   fetchNotice,
   fetchNotices,
   JURISDICTIONS,
+  matchesFilters,
   REQUESTER_TYPES,
   timeLeft,
   type Notice,
@@ -46,6 +47,7 @@ export default function LedgerPage() {
     onCreated: async (e) => {
       const n = await fetchNotice(e.entityKey)
       if (!n) return // someone else's app, or an outcome
+      if (!matchesFilters(n, filters)) return
       setNotices((cur) => (cur && !cur.some((c) => c.key === n.key) ? [n, ...cur] : cur))
       setFresh((s) => new Set(s).add(n.key))
     },

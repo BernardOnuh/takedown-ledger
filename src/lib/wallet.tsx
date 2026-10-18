@@ -87,7 +87,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const chainId = `0x${tiramisu.id.toString(16)}` as Hex
     try {
       await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] })
-    } catch {
+    } catch (e) {
+      // 4001 = the user rejected the switch; only offer to add the chain when it's actually missing.
+      if ((e as { code?: number }).code === 4001) throw e
       await eth.request({
         method: "wallet_addEthereumChain",
         params: [
