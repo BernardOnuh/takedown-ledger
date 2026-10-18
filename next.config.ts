@@ -5,6 +5,10 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
+    // See src/lib/stubs/base-account.ts.
+    resolveAlias: {
+      "@base-org/account": "./src/lib/stubs/base-account.ts",
+    },
     rules: {
       "*.css": {
         loaders: ["@tailwindcss/turbopack"],

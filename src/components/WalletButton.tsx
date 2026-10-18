@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, type ReactNode } from "react"
-import { FAUCET, friendlyError } from "@/lib/arkiv"
+import { FAUCET } from "@/lib/arkiv"
 import { useWallet } from "@/lib/wallet"
 import { Addr } from "./ui"
 
@@ -20,10 +20,20 @@ function Menu({ onClose, children }: { onClose: () => void; children: ReactNode 
 }
 
 export function WalletButton() {
-  const { address, mode, balance, hasInjected, connectInjected, connectBurner, disconnect, refreshBalance } = useWallet()
+  const { address, mode, balance, wrongNetwork, openConnect, openSwitchNetwork, connectBurner, disconnect, refreshBalance } = useWallet()
   const [open, setOpen] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
   const close = () => setOpen(false)
+
+  if (address && wrongNetwork) {
+    return (
+      <button
+        onClick={openSwitchNetwork}
+        className="rounded-full border border-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)]"
+      >
+        Switch to Tiramisu
+      </button>
+    )
+  }
 
   if (address) {
     const empty = Number(balance ?? 0) < 0.01
@@ -40,7 +50,7 @@ export function WalletButton() {
         {open && (
           <Menu onClose={close}>
             <p className="mb-1 font-medium text-[var(--muted)]">
-              {mode === "burner" ? "In-browser test wallet" : "Browser wallet"} · {balance ?? "…"} GLM
+              {mode === "burner" ? "In-browser test wallet" : "Connected wallet"} · {balance ?? "…"} GLM
             </p>
             <p className="mb-3">
               <Addr a={address} label={address} />
@@ -92,22 +102,16 @@ export function WalletButton() {
             Reading needs no wallet. Filing and preserving need free test GLM on Arkiv&apos;s Tiramisu testnet.
           </p>
           <div className="space-y-2">
-            {hasInjected && (
-              <button
-                onClick={async () => {
-                  try {
-                    await connectInjected()
-                    close()
-                  } catch (e) {
-                    setErr(friendlyError(e))
-                  }
-                }}
-                className={item}
-              >
-                <span className="font-medium">Browser wallet</span>
-                <span className="block text-xs text-[var(--muted)]">MetaMask or similar</span>
-              </button>
-            )}
+            <button
+              onClick={() => {
+                close()
+                openConnect()
+              }}
+              className={item}
+            >
+              <span className="font-medium">Connect a wallet</span>
+              <span className="block text-xs text-[var(--muted)]">MetaMask, Rabby, Rainbow and more</span>
+            </button>
             <button
               onClick={() => {
                 connectBurner()
@@ -119,7 +123,6 @@ export function WalletButton() {
               <span className="block text-xs text-[var(--muted)]">No extension needed. Testnet only.</span>
             </button>
           </div>
-          {err && <p className="mt-2 text-[var(--accent)]">{err}</p>}
         </Menu>
       )}
     </div>

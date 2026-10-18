@@ -30,7 +30,7 @@ function Section({ step, title, children }: { step: number; title: string; child
 
 export default function FilePage() {
   const router = useRouter()
-  const { wallet, balance, connectBurner } = useWallet()
+  const { wallet, balance, wrongNetwork, connectBurner, openConnect, openSwitchNetwork } = useWallet()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [f, setF] = useState({
@@ -50,6 +50,7 @@ export default function FilePage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (wrongNetwork) return openSwitchNetwork()
     if (!wallet) return setErr("Connect a wallet first — the in-browser test wallet above works.")
     setBusy(true)
     setErr(null)
@@ -91,14 +92,27 @@ export default function FilePage() {
         that identifies a person. This demo is for synthetic data only.
       </div>
 
-      {!wallet && (
-        <div className="flex flex-col gap-3 rounded-xl border border-[var(--line)] bg-[var(--card)] p-4 sm:flex-row sm:items-center sm:justify-between">
+      {!wallet && !wrongNetwork && (
+        <div className="space-y-3 rounded-xl border border-[var(--line)] bg-[var(--card)] p-4">
           <p className="text-sm">
             <strong>You&apos;ll need a wallet to file.</strong>{" "}
-            <span className="text-[var(--muted)]">No extension? Use a throwaway test wallet in this browser.</span>
+            <span className="text-[var(--muted)]">No wallet? Use a throwaway test wallet that lives in this browser.</span>
           </p>
-          <button onClick={connectBurner} className="shrink-0 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-semibold text-[var(--bg)]">
-            Use test wallet
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            <button onClick={connectBurner} className="rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-semibold text-[var(--bg)]">
+              Use test wallet
+            </button>
+            <button onClick={openConnect} className="rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-semibold">
+              Connect wallet
+            </button>
+          </div>
+        </div>
+      )}
+      {wrongNetwork && (
+        <div className="flex flex-col gap-3 rounded-xl border border-[var(--accent)] bg-[var(--card)] p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm">Your wallet is on another network. Notices are filed on Arkiv&apos;s Tiramisu testnet.</p>
+          <button onClick={openSwitchNetwork} className="shrink-0 rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white">
+            Switch to Tiramisu
           </button>
         </div>
       )}
